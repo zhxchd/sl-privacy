@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import tqdm
+import defense
 # import datasets, architectures
 
 def distance_data_loss(a,b):
@@ -20,6 +21,7 @@ class sl_with_attack:
             input_shape = xpriv.element_spec[0].shape
             self.hparams = hparams
             self.server_attack = server_attack
+            self.class_num = class_num
 
             # setup dataset
             self.client_dataset = xpriv.batch(batch_size, drop_remainder=True).repeat(-1)
@@ -52,6 +54,14 @@ class sl_with_attack:
                 self.optimizer0 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_f'])
                 self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_tilde'])
                 self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_D'])
+            
+            self.alpha1 = 0.0
+            self.alpha2 = 1.0
+            if ("alpha" in hparams) and (hparams["alpha"] is not None):
+                self.alpha1, self.alpha2 = hparams["alpha"]
+                print("Minimize distance correlation with alpha1=" + str(self.alpha1) + " and alpha2=" + str(self.alpha2))
+                if self.attack == "active":
+                    print("Actice attack scales alpha2 to 25.0")
 
     @staticmethod
     def addNoise(x, alpha):
@@ -70,8 +80,16 @@ class sl_with_attack:
 
             # classification output and loss
             server_output = self.g(z_private, training=True)
-            c_loss = tf.keras.losses.sparse_categorical_crossentropy(y_true=label_private, y_pred=server_output)
-            c_train_accuracy = tf.keras.metrics.sparse_categorical_accuracy(label_private, server_output)
+            if self.alpha1 != 0.0:
+                # nopeek defense
+                dcor = defense.dist_corr(x_private, z_private) * self.alpha1
+
+            if self.class_num == 2:
+                c_loss = tf.keras.losses.binary_crossentropy(y_true=label_private, y_pred=server_output) * self.alpha2
+                c_train_accuracy = tf.keras.metrics.binary_accuracy(label_private, server_output)
+            else:
+                c_loss = tf.keras.losses.sparse_categorical_crossentropy(y_true=label_private, y_pred=server_output) * self.alpha2
+                c_train_accuracy = tf.keras.metrics.sparse_categorical_accuracy(label_private, server_output)
 
             if self.server_attack is not None:
                 # map to data space (for evaluation and style loss)
@@ -91,6 +109,8 @@ class sl_with_attack:
                         f_loss = tf.reduce_mean(adv_private_logits)
                     else:
                         f_loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(tf.ones_like(adv_private_logits), adv_private_logits, from_logits=True))
+                    if self.alpha1 != 0.0:
+                        f_loss = f_loss * 25.0
                 else:
                     if self.hparams['WGAN']:
                         f_loss = -tf.reduce_mean(adv_public_logits)
@@ -150,6 +170,11 @@ class sl_with_attack:
                 var = self.f.trainable_variables
                 gradients = tape.gradient(f_loss, var)
                 self.optimizer0.apply_gradients(zip(gradients, var))
+                if self.alpha1 != 0.0:
+                    # f is also updated by distance decorrelation
+                    var = self.f.trainable_variables
+                    gradients = tape.gradient(dcor, var)
+                    self.optimizer0.apply_gradients(zip(gradients, var))
                 # encoder and decoder are updated together
                 var = self.tilde_f.trainable_variables + self.decoder.trainable_variables
                 gradients = tape.gradient(tilde_f_loss, var)
@@ -159,6 +184,11 @@ class sl_with_attack:
                 var = self.f.trainable_variables + self.g.trainable_variables
                 gradients = tape.gradient(c_loss, var)
                 self.optimizer3.apply_gradients(zip(gradients, var))
+                if self.alpha1 != 0.0:
+                    # f and g are also updated by distance decorrelation
+                    var = self.f.trainable_variables
+                    gradients = tape.gradient(dcor, var)
+                    self.optimizer3.apply_gradients(zip(gradients, var))
                 # encoder is updated by f_loss
                 var = self.tilde_f.trainable_variables
                 gradients = tape.gradient(f_loss, var)

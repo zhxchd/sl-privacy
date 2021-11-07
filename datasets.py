@@ -1,15 +1,20 @@
+from numpy.core.numeric import identity
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+from sklearn.model_selection import train_test_split
 
 BUFFER_SIZE = 10000
 SIZE = 32
+min_values = None
+max_values = None
 
 getImagesDS = lambda X, n: np.concatenate([x[0].numpy()[None,] for x in X.take(n)])
 
 def parse(x):
     x = x[:,:,None]
-    x = tf.tile(x, (1,1,3))    
+    x = tf.tile(x, (1,1,3))
     x = tf.image.resize(x, (SIZE, SIZE))
     x = x / (255/2) - 1
     x = tf.clip_by_value(x, -1., 1.)
@@ -40,7 +45,25 @@ def load_mnist():
     
     return xpriv, xpub
 
+def load_credit_card(normalization=None):
+    df = pd.read_excel('./datasets/credit-card.xls', header=1, index_col=0).sample(frac=1)
+    global min_values
+    min_values = df.drop(columns=["default payment next month"]).describe().transpose()['min'].to_numpy()
+    global max_values
+    max_values = df.drop(columns=["default payment next month"]).describe().transpose()['max'].to_numpy()
+    x = df.drop(columns=["default payment next month"]).to_numpy()
+    if normalization is "feature":
+        x = (x-min_values)/(max_values-min_values)
+    elif normalization is "example":
+        x = np.array([i/np.linalg.norm(i) for i in x])
+    y = df["default payment next month"].to_numpy().reshape((len(x), 1)).astype("float32")
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
+    xpriv = make_dataset(x_train, y_train, lambda t: t)
+    xpub = make_dataset(x_test, y_test, lambda t: t)
+    return xpriv, xpub, max_values, min_values
 
+def restore_from_normalized(X):
+    return np.apply_along_axis(lambda x: x * (max_values - min_values) + min_values, 1, X)
 
 def load_mnist_mangled(class_to_remove):
     mnist = tf.keras.datasets.mnist

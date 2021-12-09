@@ -17,11 +17,12 @@ class sl_with_attack:
     def loadBiasNetwork(self, make_decoder, z_shape, channels):
         return make_decoder(z_shape, channels=channels)
         
-    def __init__(self, models, xpriv, xpub, id_setup, batch_size, hparams, class_num, server_attack=None):
+    def __init__(self, models, xpriv, xpub, id_setup, batch_size, hparams, class_num, server_attack=None, sorted=False):
             input_shape = xpriv.element_spec[0].shape
             self.hparams = hparams
             self.server_attack = server_attack
             self.class_num = class_num
+            self.sorted = sorted
 
             # setup dataset
             self.client_dataset = xpriv.batch(batch_size, drop_remainder=True).repeat(-1)
@@ -93,7 +94,11 @@ class sl_with_attack:
 
             if self.server_attack is not None:
                 # map to data space (for evaluation and style loss)
-                rec_x_private = self.decoder(z_private, training=True) # reconstructed x_private
+                if self.sorted:
+                    z_private_sorted = tf.sort(z_private,axis=-1)
+                    rec_x_private = self.decoder(z_private_sorted, training=True) # reconstructed x_private
+                else:
+                    rec_x_private = self.decoder(z_private, training=True) # reconstructed x_private
 
                 # in the meantime, this is f'(xpub)
                 z_public = self.tilde_f(x_public, training=True)
@@ -119,7 +124,11 @@ class sl_with_attack:
                 
 
                 # invertibility loss: to train the decoder/autoencoder
-                rec_x_public = self.decoder(z_public, training=True)
+                if self.sorted:
+                    z_public_sorted = tf.sort(z_public, axis=-1)
+                    rec_x_public = self.decoder(z_public_sorted, training=True)
+                else:
+                    rec_x_public = self.decoder(z_public, training=True)
                 # print("decoder(tilde_f(pub_x)) shape")
                 # print(rec_x_public.shape)
 

@@ -7,8 +7,8 @@ from sklearn.model_selection import train_test_split
 
 BUFFER_SIZE = 10000
 SIZE = 32
-min_values = None
-max_values = None
+# min_values = None
+# max_values = None
 
 getImagesDS = lambda X, n: np.concatenate([x[0].numpy()[None,] for x in X.take(n)])
 
@@ -33,6 +33,14 @@ def make_dataset(X, Y, f):
     xy = xy.shuffle(BUFFER_SIZE)
     return xy
 
+def make_dataset_with_property(X,Y,P,f):
+    x = tf.data.Dataset.from_tensor_slices(X)
+    y = tf.data.Dataset.from_tensor_slices(Y)
+    p = tf.data.Dataset.from_tensor_slices(P)
+    x = x.map(f)
+    xpy = tf.data.Dataset.zip((x, p, y))
+    xpy = xpy.shuffle(BUFFER_SIZE)
+    return xpy
 
 def load_mnist():
     mnist = tf.keras.datasets.mnist
@@ -45,25 +53,54 @@ def load_mnist():
     
     return xpriv, xpub
 
-def load_credit_card(normalization=None):
+# We just assume it's nomalization by feature, for now
+def load_credit_card_without_xpub(property_id=None, num2cat=None):
     df = pd.read_excel('./datasets/credit-card.xls', header=1, index_col=0).sample(frac=1)
-    global min_values
+    x_train = df.drop(columns=["default payment next month"]).to_numpy()
+    y_train = df["default payment next month"].to_numpy().reshape((len(x_train), 1)).astype("float32")
+    x_test = np.random.rand(*x_train.shape)
+    y_test = np.zeros_like(y_train).astype("float32")
+    properties = x_train[:,property_id]
+    np.random.shuffle(properties)
+    x_test[:,property_id] = properties
+    if property_id is not None:
+        p_train = np.array([num2cat(i) for i in x_train[:,property_id]]).astype("float32")
+        p_test = np.array([num2cat(i) for i in x_test[:,property_id]]).astype("float32")
+
     min_values = df.drop(columns=["default payment next month"]).describe().transpose()['min'].to_numpy()
-    global max_values
+    max_values = df.drop(columns=["default payment next month"]).describe().transpose()['max'].to_numpy()
+    x_train = (x_train-min_values)/(max_values-min_values)
+    # x_test has already been normalized, except the property of interest
+    x_test[:,property_id] = (x_test[:,property_id] - min_values[property_id])/(max_values[property_id] - min_values[property_id])
+
+    xpriv = make_dataset_with_property(x_train, y_train, p_train, lambda t: t)
+    xpub = make_dataset_with_property(x_test, y_test, p_test, lambda t: t)
+    return xpriv, xpub
+
+def load_credit_card(normalization=None, property_id=None, num2cat=None):
+    df = pd.read_excel('./datasets/credit-card.xls', header=1, index_col=0).sample(frac=1)
+    min_values = df.drop(columns=["default payment next month"]).describe().transpose()['min'].to_numpy()
     max_values = df.drop(columns=["default payment next month"]).describe().transpose()['max'].to_numpy()
     x = df.drop(columns=["default payment next month"]).to_numpy()
-    if normalization is "feature":
+    if property_id is not None:
+        p = np.array([num2cat(i) for i in x[:,property_id]]).astype("float32")
+    if normalization == "feature":
         x = (x-min_values)/(max_values-min_values)
-    elif normalization is "example":
+    elif normalization == "example":
         x = np.array([i/np.linalg.norm(i) for i in x])
     y = df["default payment next month"].to_numpy().reshape((len(x), 1)).astype("float32")
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
-    xpriv = make_dataset(x_train, y_train, lambda t: t)
-    xpub = make_dataset(x_test, y_test, lambda t: t)
-    return xpriv, xpub, max_values, min_values
+    if property_id == None:
+        x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
+        xpriv = make_dataset(x_train, y_train, lambda t: t)
+        xpub = make_dataset(x_test, y_test, lambda t: t)
+    else:
+        x_train, x_test, y_train, y_test, p_train, p_test = train_test_split(x, y, p, test_size=0.2, random_state=42)
+        xpriv = make_dataset_with_property(x_train, y_train, p_train, lambda t: t)
+        xpub = make_dataset_with_property(x_test, y_test, p_test, lambda t: t)
+    return xpriv, xpub
 
-def restore_from_normalized(X):
-    return np.apply_along_axis(lambda x: x * (max_values - min_values) + min_values, 1, X)
+# def restore_from_normalized(X):
+    # return np.apply_along_axis(lambda x: x * (max_values - min_values) + min_values, 1, X)
 
 def load_mnist_mangled(class_to_remove):
     mnist = tf.keras.datasets.mnist

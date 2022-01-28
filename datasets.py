@@ -53,6 +53,17 @@ def load_mnist():
     
     return xpriv, xpub
 
+def load_cifar10():
+    cifar10 = tf.keras.datasets.cifar10
+    (x_train, y_train), (x_test, y_test) = cifar10.load_data()
+    x_train = x_train.astype(np.float32)
+    x_test = x_test.astype(np.float32)
+    
+    xpriv = make_dataset(x_train, y_train, parseC)
+    xpub = make_dataset(x_test, y_test, parseC)
+
+    return xpriv, xpub
+
 # We just assume it's nomalization by feature, for now
 def load_credit_card_without_xpub(property_id=None, num2cat=None):
     df = pd.read_excel('./datasets/credit-card.xls', header=1, index_col=0).sample(frac=1)

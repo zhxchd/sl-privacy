@@ -49,12 +49,13 @@ class sl_with_attack:
 
             # setup optimizers
             # the optimizer to update f and g are always present (in active attack, it only updates g since update of f has been hijacked)
-            self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_classify'])
+            self.original_opt = tf.keras.optimizers.Adam(learning_rate=hparams['lr_classify'])
 
             if self.server_attack is not None:
-                self.optimizer0 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_f'])
-                self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_tilde'])
-                self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_D'])
+                self.f_opt = tf.keras.optimizers.Adam(learning_rate=hparams['lr_f'])
+                self.encoder_opt = tf.keras.optimizers.Adam(learning_rate=hparams['lr_encoder'])
+                self.decoder_opt = tf.keras.optimizers.Adam(learning_rate=hparams['lr_decoder'])
+                self.discriminator_opt = tf.keras.optimizers.Adam(learning_rate=hparams['lr_discriminator'])
             
             self.alpha1 = 0.0
             self.alpha2 = 1.0
@@ -159,53 +160,52 @@ class sl_with_attack:
                 ############################################
                 ##################################################################
 
-
         # train all the models:
         if self.server_attack is None:
             # No attacks, directly update f and g
             var = self.f.trainable_variables + self.g.trainable_variables
             gradients = tape.gradient(c_loss, var)
-            self.optimizer3.apply_gradients(zip(gradients, var))
+            self.original_opt.apply_gradients(zip(gradients, var))
         else:
             var = self.D.trainable_variables
             gradients = tape.gradient(D_loss, var)
-            self.optimizer2.apply_gradients(zip(gradients, var))
+            self.discriminator_opt.apply_gradients(zip(gradients, var))
             if self.server_attack == "active":
                 # g is updated as usual
                 var = self.g.trainable_variables
                 gradients = tape.gradient(c_loss, var)
-                self.optimizer3.apply_gradients(zip(gradients, var))
+                self.original_opt.apply_gradients(zip(gradients, var))
                 # f is updated by f_loss
                 var = self.f.trainable_variables
                 gradients = tape.gradient(f_loss, var)
-                self.optimizer0.apply_gradients(zip(gradients, var))
+                self.f_opt.apply_gradients(zip(gradients, var))
                 if self.alpha1 != 0.0:
                     # f is also updated by distance decorrelation
                     var = self.f.trainable_variables
                     gradients = tape.gradient(dcor, var)
-                    self.optimizer0.apply_gradients(zip(gradients, var))
+                    self.f_opt.apply_gradients(zip(gradients, var))
                 # encoder and decoder are updated together
                 var = self.tilde_f.trainable_variables + self.decoder.trainable_variables
                 gradients = tape.gradient(tilde_f_loss, var)
-                self.optimizer1.apply_gradients(zip(gradients, var))
+                self.encoder_opt.apply_gradients(zip(gradients, var))
             elif self.server_attack == "passive":
                 # f and g are updated together
                 var = self.f.trainable_variables + self.g.trainable_variables
                 gradients = tape.gradient(c_loss, var)
-                self.optimizer3.apply_gradients(zip(gradients, var))
+                self.original_opt.apply_gradients(zip(gradients, var))
                 if self.alpha1 != 0.0:
                     # f and g are also updated by distance decorrelation
                     var = self.f.trainable_variables
                     gradients = tape.gradient(dcor, var)
-                    self.optimizer3.apply_gradients(zip(gradients, var))
+                    self.original_opt.apply_gradients(zip(gradients, var))
                 # encoder is updated by f_loss
                 var = self.tilde_f.trainable_variables
                 gradients = tape.gradient(f_loss, var)
-                self.optimizer1.apply_gradients(zip(gradients, var))
+                self.encoder_opt.apply_gradients(zip(gradients, var))
                 # decoder is updated separately
                 var = self.decoder.trainable_variables
                 gradients = tape.gradient(tilde_f_loss, var)
-                self.optimizer1.apply_gradients(zip(gradients, var))
+                self.decoder_opt.apply_gradients(zip(gradients, var))
 
         if self.server_attack is None:
             return c_loss, c_train_accuracy

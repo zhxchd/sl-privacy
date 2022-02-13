@@ -115,12 +115,17 @@ class mra:
                     if use_generator:
                         # if we use generator, we update the generator
                         with tf.GradientTape() as tape:
-                            if input_noise and input_z:
+                            if input_noise == "normal" and input_z:
                                 r = tf.random.normal(shape=z.shape, mean=0.5, stddev=0.25)
                                 input = tf.concat([z,r],axis=1)
-                            elif input_noise and (not input_z):
+                            elif input_noise == "uniform" and input_z:
+                                r = tf.constant(np.random.rand(*(z.numpy().shape)).astype("float32"))
+                                input = tf.concat([z,r],axis=1)
+                            elif input_noise == "normal" and (not input_z):
                                 input = tf.random.normal(shape=z.shape, mean=0.5, stddev=0.25)
-                            elif (not input_noise) and input_z:
+                            elif input_noise == "uniform" and (not input_z):
+                                input = tf.constant(np.random.rand(*(z.numpy().shape)).astype("float32"))
+                            elif (input_noise == False) and input_z:
                                 input = z
                             else:
                                 raise ValueError("Must define the input when generator is present.")

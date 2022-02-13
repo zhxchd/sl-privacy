@@ -1,3 +1,4 @@
+from logging import exception
 import numpy as np
 import tensorflow as tf
 from collections.abc import Iterable
@@ -49,8 +50,11 @@ class mra:
             grad = tape.gradient(loss, var)
             opt.apply_gradients(zip(grad, var))
             
-            if isinstance(loss, Iterable):
-                loss = sum(loss)/len(loss)
+            try:
+                if len(loss) != 1:
+                    loss = sum(loss)/len(loss)
+            except:
+                pass
 
             log.append(loss)
             iter_count += 1

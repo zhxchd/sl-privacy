@@ -109,7 +109,7 @@ class mra:
 
             if not use_generator:
                 # we randomly initialize x_temp to search the best x
-                x_temp = np.random.normal(0.5, 0.25, z.shape)
+                x_temp = np.random.normal(0.5, 0.25, x.shape)
                 x_temp = tf.Variable(x_temp)
             
             for _ in range(epoch):

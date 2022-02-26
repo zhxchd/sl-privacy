@@ -1,5 +1,7 @@
 import tensorflow as tf
 import numpy as np
+from sklearn.model_selection import train_test_split
+import tensorflow_datasets as tfds
 
 """
 This file contains a few static methods to load image datasets.
@@ -83,3 +85,18 @@ def load_cifar10vs100():
     aux_ds = make_dataset(x_test, y_test, lambda x: tf.clip_by_value(x/(255.0/2.0)-1.0, -1., 1.))
 
     return target_ds, aux_ds
+
+def load_cat_vs_dog(take_first=-1):
+    ds = tfds.load("cats_vs_dogs")
+    x = [x["image"].numpy() for x in ds["train"]]
+    y = [x["label"].numpy() for x in ds["train"]]
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
+    x_train = np.array([tf.image.resize(i, size=(32,32)).numpy() for i in x_train])
+    x_test = np.array([tf.image.resize(i, size=(32,32)).numpy() for i in x_test])
+
+    if take_first == -1:
+        target_ds = make_dataset(x_train, y_train, lambda x: tf.clip_by_value(x/(255.0/2.0)-1.0, -1., 1.))
+        aux_ds = make_dataset(x_test, y_test, lambda x: tf.clip_by_value(x/(255.0/2.0)-1.0, -1., 1.))
+        return target_ds, aux_ds
+    else:
+        return x_train[0:take_first,:,:,:]/(255.0/2.0)-1.0

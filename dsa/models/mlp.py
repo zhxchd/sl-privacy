@@ -46,6 +46,7 @@ def make_d(input_shape, attr_num, act):
     x = layers.Dense(attr_num*6, activation=act)(xin)
     x = layers.Dense(attr_num*3, activation=act)(x)
     x = layers.Dense(attr_num, activation="sigmoid")(x)
+    return tf.keras.Model(xin, x)
 
 def make_c(input_shape):
     xin = layers.Input(input_shape)
@@ -54,3 +55,4 @@ def make_c(input_shape):
     x = layers.Dense(512, activation="relu")(x)
     x = layers.Dense(512, activation="relu")(x)
     x = layers.Dense(1)(x)
+    return tf.keras.Model(xin, x)

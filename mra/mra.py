@@ -158,6 +158,7 @@ class mra:
             rg_normal = tf.losses.MeanSquaredError()(x, np.random.normal(0.5, 0.25, size=(x.numpy().shape)))
             log.append([rg_uniform, rg_normal, attack_mse])
             iter_count += 1
+            print(tf.keras.losses.MeanSquaredError()(f_temp(x_temp, training=False), z))
             if verbose and (iter_count - 1) % log_every == 0:
                 print("Iteration %04d: RG-uniform: %0.4f, RG-normal: %0.4f, reconstruction validation: %0.4f" % (iter_count, rg_uniform, rg_normal, attack_mse))
         

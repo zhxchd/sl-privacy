@@ -41,7 +41,10 @@ class dsa:
             with tf.GradientTape(persistent=True) as tape:
                 z_private = self.f(x_private, training=True)
                 y_pred = self.g(z_private, training=True)
-                loss = tf.keras.losses.sparse_categorical_crossentropy(y_true=label_private, y_pred=y_pred)
+                if y_pred.shape[1] == 1:
+                    loss = tf.keras.losses.binary_crossentropy(y_true=label_private, y_pred=y_pred, from_logits=False)
+                else:
+                    loss = tf.keras.losses.sparse_categorical_crossentropy(y_true=label_private, y_pred=y_pred)
 
                 z_public = self.e(x_public, training=True)
                 
@@ -53,6 +56,7 @@ class dsa:
                 c_loss = tf.reduce_mean( c_public_logits ) - tf.reduce_mean( c_privite_logits )
                 
                 gp = self.get_gradient_penalty(z_private, z_public)
+                
                 c_loss += gp * float(w)
             
             # update f and g:
@@ -87,24 +91,26 @@ class dsa:
             loss_verification = tf.losses.MeanSquaredError()(x_private, rec_x_private)
             log.append([sum(loss)/len(loss), loss_verification])
 
+            acc_loss += loss_verification.numpy()
+
             if verbose and iter % log_freq == 0:
                 print("Iteration {}, average attack MSE: {}".format(iter, acc_loss/log_freq))
                 acc_loss = 0.0
-            else:
-                acc_loss += loss_verification.numpy()
 
             iter += 1
         
         return np.array(log)
     
     def get_gradient_penalty(self, x, x_gen):
-        epsilon = tf.random.uniform([x.shape[0], 1, 1, 1], 0.0, 1.0)
+        e_shape = [1 for i in range(len(x.shape))]
+        e_shape[0] = x.shape[0]
+        epsilon = tf.random.uniform(e_shape, 0.0, 1.0)
         x_hat = epsilon * x + (1 - epsilon) * x_gen
         with tf.GradientTape() as t:
             t.watch(x_hat)
             d_hat = self.c(x_hat, training=True)
         gradients = t.gradient(d_hat, x_hat)
-        ddx = tf.sqrt(tf.reduce_sum(gradients ** 2, axis=[1, 2]))
+        ddx = tf.sqrt(tf.reduce_sum(gradients ** 2, axis=[i + 1 for i in range(len(x.shape)-2)]))
         d_regularizer = tf.reduce_mean((ddx - 1.0) ** 2)
         return d_regularizer
     

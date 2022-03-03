@@ -68,9 +68,8 @@ def make_g(input_shape, class_num, level):
 Note that the attacker does not know the model architecture of the client,
 but only knows the output dimension of the client model.
 """
-def make_e(input_shape, level):
+def make_e(input_shape, level, act):
     xin = tf.keras.layers.Input(input_shape)
-    act = "relu"
     x = tf.keras.layers.Conv2D(64, 3, 2, padding='same', activation=act)(xin)
     if level == 1:
         x = tf.keras.layers.Conv2D(64, 3, 1, padding='same')(x)
@@ -110,6 +109,20 @@ def make_c(input_shape, level):
     x = tf.keras.layers.Dense(1)(x)
     return tf.keras.Model(xin, x)
 
+def make_d_fsha(input_shape, level, channels=3):
+    xin = tf.keras.layers.Input(input_shape)
+    act = None
+    x = tf.keras.layers.Conv2DTranspose(256, 3, 2, padding='same', activation=act)(xin)
+    if level == 1:
+        x = tf.keras.layers.Conv2D(channels, 3, 1, padding='same', activation="tanh")(x)
+        return tf.keras.Model(xin, x)
+    x = tf.keras.layers.Conv2DTranspose(128, 3, 2, padding='same', activation=act)(x)
+    if level <= 3:
+        x = tf.keras.layers.Conv2D(channels, 3, 1, padding='same', activation="tanh")(x)
+        return tf.keras.Model(xin, x)
+    x = tf.keras.layers.Conv2DTranspose(channels, 3, 2, padding='same', activation="tanh")(x)
+    return tf.keras.Model(xin, x)
+
 """
 Note that this is a generator only for 32x32x3 images
 """
@@ -141,6 +154,14 @@ def make_resnet(split, class_num):
     return (
         functools.partial(make_f, level=split),
         functools.partial(make_g, level=split, class_num=class_num),
-        functools.partial(make_e, level=split),
+        functools.partial(make_e, level=split, act="swish"),
         functools.partial(make_d),
+        functools.partial(make_c, level=split))
+
+def make_resnet_fsha(split, class_num):
+    return (
+        functools.partial(make_f, level=split),
+        functools.partial(make_g, level=split, class_num=class_num),
+        functools.partial(make_e, level=split, act=None),
+        functools.partial(make_d_fsha, level=split),
         functools.partial(make_c, level=split))

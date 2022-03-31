@@ -45,7 +45,7 @@ class FSHA:
     def loadBiasNetwork(self, make_decoder, z_shape, channels):
         return make_decoder(z_shape, channels=channels)
         
-    def __init__(self, xpriv, xpub, models, batch_size, hparams):
+    def __init__(self, xpriv, xpub, models, loss_fn, acc_fn, batch_size, hparams):
             input_shape = xpriv.element_spec[0].shape
             
             self.hparams = hparams
@@ -53,6 +53,8 @@ class FSHA:
             # setup dataset
             self.client_dataset = xpriv.batch(batch_size, drop_remainder=True).repeat(-1)
             self.attacker_dataset = xpub.batch(batch_size, drop_remainder=True).repeat(-1)
+            self.loss_fn = loss_fn
+            self.acc_fn = acc_fn
             self.batch_size = batch_size
 
             ## setup models
@@ -66,7 +68,8 @@ class FSHA:
 
             self.D = make_D(z_shape)
             self.g = make_g(z_shape)
-            self.decoder = self.loadBiasNetwork(make_decoder, z_shape, channels=input_shape[-1])
+            self.decoder = make_decoder(z_shape)
+#             self.decoder = self.loadBiasNetwork(make_decoder, z_shape, channels=input_shape[-1])
 
             # setup optimizers
             self.optimizer0 = tf.keras.optimizers.Adam(learning_rate=hparams['lr_f'])
@@ -93,12 +96,14 @@ class FSHA:
 
             #### SERVER-SIDE:
             output = self.g(z_private, training=True)
-            if output.shape[1] == 1:
-                # binary classification
-                clarify_loss = tf.keras.losses.binary_crossentropy(y_true=label_private, y_pred=output)
-            elif output.shape[1] >= 3:
-                # more than 2 classes
-                clarify_loss = tf.keras.losses.sparse_categorical_crossentropy(y_true=label_private, y_pred=output)
+            clarify_loss = self.loss_fn(y_true=label_private, y_pred=output)
+            acc = self.acc_fn(y_true=label_private, y_pred=output)
+            # if output.shape[1] == 1:
+            #     # binary classification
+            #     clarify_loss = tf.keras.losses.binary_crossentropy(y_true=label_private, y_pred=output)
+            # elif output.shape[1] >= 3:
+            #     # more than 2 classes
+            #     clarify_loss = tf.keras.losses.sparse_categorical_crossentropy(y_true=label_private, y_pred=output)
 
             # map to data space (for evaluation and style loss)
             rec_x_private = self.decoder(z_private, training=True)
@@ -165,7 +170,7 @@ class FSHA:
         self.optimizer2.apply_gradients(zip(gradients, var))
 
 
-        return clarify_loss, loss_c_verification
+        return clarify_loss, acc, loss_c_verification
 
 
     def gradient_penalty(self, x, x_gen):
@@ -222,27 +227,28 @@ class FSHA:
         i, j = 0, 0
         print("RUNNING...")
         for (x_private, label_private), (x_public, label_public) in iterator:
-            clarify_loss, attack_mse = self.train_step(x_private, x_public, label_private, label_public)
+            train_loss, train_acc, attack_mse = self.train_step(x_private, x_public, label_private, label_public)
 
-            train_loss = sum(clarify_loss)/len(clarify_loss)
-
-            LOG.append([train_loss, attack_mse])
+            LOG.append([train_loss, train_acc, attack_mse])
 
             if i == 0:
                 VAL = attack_mse
                 LOS = train_loss
+                ACC = train_acc
 
             else:
                 LOS += train_loss / log_frequency
                 VAL += attack_mse / log_frequency
+                ACC += train_acc / log_frequency
 
             if  i % log_frequency == 0:
 
                 if verbose:
-                    print("Iteration %07d train loss: %0.4f, validation: %0.4f" % (i, LOS, VAL) )
+                    print("Iteration %07d train accuracy: %0.4f, validation: %0.4f" % (i, ACC, VAL) )
 
                 VAL = 0
                 LOS = 0
+                ACC = 0
                 j += 1
 
             i += 1

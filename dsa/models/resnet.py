@@ -39,7 +39,7 @@ def make_f(input_shape, level):
     else:
         raise Exception('No level %d' % level)
 
-def make_g(input_shape, class_num, level):
+def make_g(input_shape, level, units, act):
     xin = tf.keras.layers.Input(input_shape)
     x = xin
     if level == 1:
@@ -53,15 +53,7 @@ def make_g(input_shape, class_num, level):
     x = tf.keras.layers.Flatten()(x)
 
     x = tf.keras.layers.BatchNormalization()(x)
-    if class_num == 2:
-        activation = "sigmoid"
-        units = 1
-    else:
-        activation = "softmax"
-        units = class_num
-
-    # x = tf.keras.layers.Dropout(0.5)(x)
-    x = tf.keras.layers.Dense(units, activation=activation)(x)
+    x = tf.keras.layers.Dense(units, activation=act)(x)
     return tf.keras.Model(xin, x)
 
 """
@@ -109,9 +101,8 @@ def make_c(input_shape, level):
     x = tf.keras.layers.Dense(1)(x)
     return tf.keras.Model(xin, x)
 
-def make_d_fsha(input_shape, level, channels=3):
+def make_d_fsha(input_shape, level, act, channels=3):
     xin = tf.keras.layers.Input(input_shape)
-    act = None
     x = tf.keras.layers.Conv2DTranspose(256, 3, 2, padding='same', activation=act)(xin)
     if level == 1:
         x = tf.keras.layers.Conv2D(channels, 3, 1, padding='same', activation="tanh")(x)
@@ -150,18 +141,18 @@ def make_d(input_shape, channels=3):
 
     return model
 
-def make_resnet(split, class_num):
+def make_resnet(split, units, act):
     return (
         functools.partial(make_f, level=split),
-        functools.partial(make_g, level=split, class_num=class_num),
-        functools.partial(make_e, level=split, act="swish"),
-        functools.partial(make_d),
+        functools.partial(make_g, level=split, units=units, act=act),
+        functools.partial(make_e, level=split, act="sigmoid"),
+        functools.partial(make_d_fsha, level=split, act="sigmoid"),
         functools.partial(make_c, level=split))
 
-def make_resnet_fsha(split, class_num):
+def make_resnet_fsha(split, units, act):
     return (
         functools.partial(make_f, level=split),
-        functools.partial(make_g, level=split, class_num=class_num),
-        functools.partial(make_e, level=split, act=None),
-        functools.partial(make_d_fsha, level=split),
+        functools.partial(make_g, level=split, units=units, act=act),
+        functools.partial(make_e, level=split, act=None), # FSHA use linear encoder and decoders
+        functools.partial(make_d_fsha, level=split, act=None),
         functools.partial(make_c, level=split))

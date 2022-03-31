@@ -12,17 +12,24 @@ class dsa:
         self.aux_ds = aux_ds
         self.input_shape = target_ds.element_spec[0].shape
     
-    def dsa_attack(self, make_f, make_g, lr, batch_size, iterations, make_e, make_d, make_c, lr_e, lr_d, lr_c, iter_d=50, w=500., verbose=True, log_freq=1):
+    def dsa_attack(self, make_f, make_g, loss_fn, acc_fn, lr, batch_size, iterations, make_e, make_d, make_c, lr_e, lr_d, lr_c, iter_d=1, w=None, flatten=True, verbose=True, log_freq=1):
         client_dataset = self.target_ds.batch(batch_size, drop_remainder=True).repeat(-1)
-        attacker_dataset = self.aux_ds.batch(batch_size, drop_remainder=True).repeat(-1)
+        attacker_dataset = self.aux_ds.repeat(-1).batch(batch_size, drop_remainder=True)
         
         self.f = make_f(self.input_shape)
         self.intermidiate_shape = self.f.layers[-1].output_shape[1:]
         self.g = make_g(input_shape=self.intermidiate_shape)
         self.e = make_e(input_shape=self.input_shape)
-        # note that the input of the decoder is first flattened
-        self.flattened_inter_dim = math.prod(self.intermidiate_shape)
-        self.d = make_d(input_shape=(self.flattened_inter_dim, ))
+        self.loss_fn = loss_fn
+        self.acc_fn = acc_fn
+        self.flatten = flatten
+        
+        if self.flatten:
+            # note that the input of the decoder is first flattened
+            self.flattened_inter_dim = math.prod(self.intermidiate_shape)
+            self.d = make_d(input_shape=(self.flattened_inter_dim, ))
+        else:
+            self.d = make_d(input_shape=self.intermidiate_shape)
         self.c = make_c(self.intermidiate_shape)
         
         self.f_opt = tf.keras.optimizers.Adam(learning_rate=lr)
@@ -35,29 +42,32 @@ class dsa:
         iter = 1
         log = []
         acc_loss = 0.0
+        acc_acc = 0.0
         
         for (x_private, label_private), (x_public, _) in iterator:
 
             with tf.GradientTape(persistent=True) as tape:
                 z_private = self.f(x_private, training=True)
                 y_pred = self.g(z_private, training=True)
-                if y_pred.shape[1] == 1:
-                    loss = tf.keras.losses.binary_crossentropy(y_true=label_private, y_pred=y_pred, from_logits=False)
-                else:
-                    loss = tf.keras.losses.sparse_categorical_crossentropy(y_true=label_private, y_pred=y_pred)
+                
+                loss = self.loss_fn(y_true=label_private, y_pred=y_pred)
+                acc = self.acc_fn(y_true=label_private, y_pred=y_pred)
 
                 z_public = self.e(x_public, training=True)
                 
-                c_privite_logits = self.c(z_private, training=True)
+                c_private_logits = self.c(z_private, training=True)
                 c_public_logits = self.c(z_public, training=True)
                 
-                e_loss = -tf.reduce_mean(c_public_logits)
-                
-                c_loss = tf.reduce_mean( c_public_logits ) - tf.reduce_mean( c_privite_logits )
-                
-                gp = self.get_gradient_penalty(z_private, z_public)
-                
-                c_loss += gp * float(w)
+                if w is not None:
+                    e_loss = -tf.reduce_mean(c_public_logits)
+                    c_loss = tf.reduce_mean( c_public_logits ) - tf.reduce_mean( c_private_logits )
+                    gp = self.get_gradient_penalty(z_private, z_public)
+                    c_loss += gp * float(w)
+                else:
+                    e_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True)(tf.ones_like(c_public_logits), c_public_logits)
+                    real_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True)(tf.ones_like(c_private_logits), c_private_logits)
+                    fake_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True)(tf.zeros_like(c_public_logits), c_public_logits)
+                    c_loss = real_loss + fake_loss
             
             # update f and g:
             var = self.f.trainable_variables + self.g.trainable_variables
@@ -75,28 +85,41 @@ class dsa:
             self.c_opt.apply_gradients(zip(gradients, var))
 
             # Now let's do something with the generative decoder:
-            flat_z_pub = self.f(x_public, training=False).numpy().reshape((batch_size, self.flattened_inter_dim))
+            # self.d_opt = tf.keras.optimizers.Adam(learning_rate=lr_d)
+            
+#             # decoder decode the updated encoder
+#             if self.flatten:
+#                 flat_z_pub = self.e(x_public, training=False).numpy().reshape((batch_size, self.flattened_inter_dim))
+#             else:
+#                 z_public = self.e(x_public, training=False)
             for _ in range(iter_d):
                 with tf.GradientTape() as tape:
-                    x_temp = self.d(flat_z_pub)
+                    if self.flatten:
+                        flat_z_pub = z_public.numpy().reshape((batch_size, self.flattened_inter_dim))
+                        x_temp = self.d(flat_z_pub, training=True)
+                    else:
+                        x_temp = self.d(z_public, training=True)
                     d_loss = tf.losses.MeanSquaredError()(x_public, x_temp)
                     var = self.d.trainable_variables
                 gradients = tape.gradient(d_loss, var)
                 self.d_opt.apply_gradients(zip(gradients, var))
     
             # Now we have the generative decoder trained, let's attack original image
-            flat_z_priv = z_private.numpy().reshape((batch_size, math.prod(self.intermidiate_shape)))
-            rec_x_private = self.d(flat_z_priv, training=False)
+            if self.flatten:
+                flat_z_priv = z_private.numpy().reshape((batch_size, math.prod(self.intermidiate_shape)))
+                rec_x_private = self.d(flat_z_priv, training=False) 
+            else:
+                rec_x_private = self.d(z_private, training=False)
 
             loss_verification = tf.losses.MeanSquaredError()(x_private, rec_x_private)
-            log.append([sum(loss)/len(loss), loss_verification])
-
+            log.append([loss, acc, loss_verification])
+            acc_acc += acc.numpy()
             acc_loss += loss_verification.numpy()
 
             if verbose and iter % log_freq == 0:
-                print("Iteration {}, average attack MSE: {}".format(iter, acc_loss/log_freq))
+                print("Iteration {}, train accuracy: {}, average attack MSE: {}".format(iter, acc_acc/log_freq, acc_loss/log_freq))
                 acc_loss = 0.0
-
+                acc_acc = 0.0
             iter += 1
         
         return np.array(log)
@@ -115,7 +138,10 @@ class dsa:
         return d_regularizer
     
     def attack_examples(self, input_examples):
-        flattened_z = self.f(input_examples, training=False).numpy().reshape((len(input_examples), self.flattened_inter_dim))
-        rec_res = self.d(flattened_z, training=False)
+        if self.flatten:
+            flattened_z = self.f(input_examples, training=False).numpy().reshape((len(input_examples), self.flattened_inter_dim))
+            rec_res = self.d(flattened_z, training=False)
+        else:
+            rec_res = self.d(self.f(input_examples, training=False), training=False)
         mse = tf.losses.MeanSquaredError()(input_examples, rec_res)
         return mse, rec_res

@@ -39,7 +39,8 @@ class mra:
         
         # log the losses of each batch while training
         log = []
-        iter_count = 0
+        iter_count = 1
+        sum_loss = 0.0
 
         for (x_batch, y_batch) in train_batches:
             with tf.GradientTape(persistent=True) as tape:
@@ -49,22 +50,17 @@ class mra:
             var = self.f.trainable_variables + self.g.trainable_variables
             grad = tape.gradient(loss, var)
             opt.apply_gradients(zip(grad, var))
-            
-            try:
-                if len(loss) != 1:
-                    loss = sum(loss)/len(loss)
-            except:
-                pass
 
             log.append(loss)
-            iter_count += 1
             
             self.x_ref.append(x_batch)
             self.z_ref.append(z)
+            sum_loss += loss
             
-            if verbose and (iter_count - 1) % log_every == 0:
-                print("Iteration %04d: Training loss: %0.4f" % (iter_count, loss))
-            
+            if verbose and iter_count % log_every == 0:
+                print("Iteration %04d: Training loss: %0.4f" % (iter_count, sum_loss/log_every))
+                sum_loss = 0.0
+            iter_count += 1
         return np.array(log)
 
     """
@@ -120,15 +116,15 @@ class mra:
                         # if we use generator, we update the generator
                         with tf.GradientTape() as tape:
                             if input_noise == "normal" and input_z:
-                                r = tf.random.normal(shape=z.shape, mean=0.5, stddev=0.25)
+                                r = tf.random.normal(shape=z.shape, mean=tf.math.reduce_mean(z), stddev=tf.math.reduce_std(z))
                                 input = tf.concat([z,r],axis=1)
                             elif input_noise == "uniform" and input_z:
-                                r = tf.constant(np.random.rand(*(z.numpy().shape)).astype("float32"))
+                                r = tf.random.uniform(shape=z.shape, minval=tf.math.reduce_min(z), maxval=tf.math.reduce_max(z))
                                 input = tf.concat([z,r],axis=1)
                             elif input_noise == "normal" and (not input_z):
                                 input = tf.random.normal(shape=z.shape, mean=0.5, stddev=0.25)
                             elif input_noise == "uniform" and (not input_z):
-                                input = tf.constant(np.random.rand(*(z.numpy().shape)).astype("float32"))
+                                input = tf.random.uniform(shape=z.shape, minval=0.0, maxval=1.0)
                             elif (input_noise == False) and input_z:
                                 input = z
                             else:
@@ -154,11 +150,11 @@ class mra:
                     f_opt.apply_gradients(zip(grad, vars))
 
             attack_mse = tf.losses.MeanSquaredError()(x_temp, x)
-            rg_uniform = tf.losses.MeanSquaredError()(x, np.random.rand(*(x.numpy().shape)))
-            rg_normal = tf.losses.MeanSquaredError()(x, np.random.normal(0.5, 0.25, size=(x.numpy().shape)))
+            rg_uniform = tf.losses.MeanSquaredError()(x, tf.random.uniform(shape=x.shape, minval=0.0, maxval=1.0))
+            rg_normal = tf.losses.MeanSquaredError()(x, tf.random.normal(shape=x.shape, mean=0.5, stddev=0.25))
             log.append([rg_uniform, rg_normal, attack_mse])
             iter_count += 1
-            print(tf.keras.losses.MeanSquaredError()(f_temp(x_temp, training=False), z))
+#             print(tf.keras.losses.MeanSquaredError()(f_temp(x_temp, training=False), z))
             if verbose and (iter_count - 1) % log_every == 0:
                 print("Iteration %04d: RG-uniform: %0.4f, RG-normal: %0.4f, reconstruction validation: %0.4f" % (iter_count, rg_uniform, rg_normal, attack_mse))
         

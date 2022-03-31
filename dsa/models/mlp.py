@@ -2,13 +2,13 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from functools import partial
 
-def make_mlp(attr_num, class_num, split, units, act="relu"):
+def make_mlp(attr_num, class_num, split, units, ed_act="sigmoid"):
     assert split >= 1 and split <= 4
     return (
-        partial(make_f, units=units, split=split, act=act),
-        partial(make_g, class_num=class_num, units=units, split=split, act=act),
-        partial(make_e, units=units, act=act),
-        partial(make_d, attr_num=attr_num, act=act),
+        partial(make_f, units=units, split=split),
+        partial(make_g, class_num=class_num, units=units, split=split),
+        partial(make_e, units=units, act=ed_act),
+        partial(make_d, attr_num=attr_num, act=ed_act),
         make_c
     )
 
@@ -34,7 +34,7 @@ def make_g(input_shape, class_num, units, split, act="relu"):
         x = layers.Dense(class_num, activation="softmax")(x)
     return tf.keras.Model(xin, x)
 
-def make_e(input_shape, units, act="relu"):
+def make_e(input_shape, units, act):
     xin = layers.Input(input_shape)
     x = layers.Dense(units*6, activation=act)(xin)
     x = layers.Dense(units*3, activation=act)(x)

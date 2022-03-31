@@ -109,14 +109,17 @@ def load_cat_vs_dog(take_first=-1):
     else:
         return x_train[0:take_first,:,:,:]/(255.0/2.0)-1.0
 
-def load_celeba(image_num=10000, take_first=-1):
+# there are in total 202599 images
+def load_celeba(image_num=202599, take_first=-1):
     celeba_dir = "/home/z/zhux105/celeba-dataset/img_align_celeba"
-    x = []
-    for i in range(image_num):
-        x.append(np.array(Image.open(os.path.join(celeba_dir, "%06d.jpg" % (i+1))))[20:-20,:,:])
-    x = np.array(x)
+    # x = []
+    # for i in range(image_num):
+    #     x.append(np.array(Image.open(os.path.join(celeba_dir, "%06d.jpg" % (i+1))))[20:-20,:,:])
+    with open('/home/z/zhux105/celeba-dataset/img_align_crop_np/images.npy', 'rb') as f:
+        x = np.load(f)
     df = pd.read_csv("/home/z/zhux105/celeba-dataset/list_attr_celeba.csv")
-    y = np.array([int(i==1) for i in df["Male"].to_numpy()[0:image_num]]).reshape((image_num, 1))
+    # y = np.array([int(i==1) for i in df["Male"].to_numpy()[0:image_num]]).reshape((image_num, 1))
+    y = (df.to_numpy()[0:image_num,1:].reshape((image_num, 40)).astype('int')+1)/2
     
     x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
     x_train = np.array([tf.image.resize(i, size=(32,32)).numpy() for i in x_train])
@@ -128,3 +131,23 @@ def load_celeba(image_num=10000, take_first=-1):
         return target_ds, aux_ds
     else:
         return x_train[0:take_first,:,:,:]/(255.0/2.0)-1.0
+
+def load_cifar_vs_celeba(image_num=202599, take_first=-1):
+    with open('/home/z/zhux105/celeba-dataset/img_align_crop_np/images.npy', 'rb') as f:
+        x = np.load(f)
+    df = pd.read_csv("/home/z/zhux105/celeba-dataset/list_attr_celeba.csv")
+    # y = np.array([int(i==1) for i in df["Male"].to_numpy()[0:image_num]]).reshape((image_num, 1))
+    y_train = (df.to_numpy()[0:image_num,1:].reshape((image_num, 40)).astype('int') + 1)/2
+
+    x_train = np.array([tf.image.resize(i, size=(32,32)).numpy() for i in x])
+    
+    if take_first == -1:
+        target_ds = make_dataset(x_train, y_train, lambda x: tf.clip_by_value(x/(255.0/2.0)-1.0, -1., 1.))
+        (cifar_x_train, cifar_y_train), (cifar_x_test, cifar_y_test) = tf.keras.datasets.cifar100.load_data()
+        cifar_x = np.append(cifar_x_train, cifar_x_test, axis=0).astype(np.float32)
+        cifar_y = np.append(cifar_y_train, cifar_y_test, axis=0)
+        aux_ds = make_dataset(cifar_x, cifar_y, lambda x: tf.clip_by_value(x/(255.0/2.0)-1.0, -1., 1.))
+        return target_ds, aux_ds
+    else:
+        return x_train[0:take_first,:,:,:]/(255.0/2.0)-1.0
+

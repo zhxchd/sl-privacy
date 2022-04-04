@@ -31,6 +31,17 @@ def make_f(input_shape, units, split, act="relu"):
     
     return tf.keras.Model(xin, x)
 
+def make_f_inverse(input_shape, units, split, attr_num, act="relu"):
+    xin = layers.Input(input_shape)
+    x = xin
+    # client side hidden layers
+    for _ in range(split-1):
+        x = layers.Dense(units, activation=act)(x)
+    
+    x = layers.Dense(attr_num, activation="sigmoid")(x)
+    
+    return tf.keras.Model(xin, x)
+
 def make_g(input_shape, class_num, units, split, act="relu"):
     xin = layers.Input(input_shape)
     x = xin

@@ -12,7 +12,7 @@ class dsa:
         self.aux_ds = aux_ds
         self.input_shape = target_ds.element_spec[0].shape
     
-    def dsa_attack(self, make_f, make_g, loss_fn, acc_fn, lr, batch_size, iterations, make_e, make_d, make_c, lr_e, lr_d, lr_c, iter_d=1, w=None, flatten=False, verbose=True, log_freq=1):
+    def dsa_attack(self, make_f, make_g, loss_fn, acc_fn, lr, batch_size, iterations, make_e, make_d, make_c, lr_e, lr_d, lr_c, w=None, flatten=False, verbose=True, log_freq=1):
         client_dataset = self.target_ds.batch(batch_size, drop_remainder=True).repeat(-1)
         attacker_dataset = self.aux_ds.repeat(-1).batch(batch_size, drop_remainder=True)
         

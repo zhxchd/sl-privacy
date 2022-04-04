@@ -12,7 +12,7 @@ class dsa:
         self.aux_ds = aux_ds
         self.input_shape = target_ds.element_spec[0].shape
     
-    def dsa_attack(self, make_f, make_g, loss_fn, acc_fn, lr, batch_size, iterations, make_e, make_d, make_c, lr_e, lr_d, lr_c, iter_d=1, w=None, flatten=True, verbose=True, log_freq=1):
+    def dsa_attack(self, make_f, make_g, loss_fn, acc_fn, lr, batch_size, iterations, make_e, make_d, make_c, lr_e, lr_d, lr_c, iter_d=1, w=None, flatten=False, verbose=True, log_freq=1):
         client_dataset = self.target_ds.batch(batch_size, drop_remainder=True).repeat(-1)
         attacker_dataset = self.aux_ds.repeat(-1).batch(batch_size, drop_remainder=True)
         
@@ -68,6 +68,13 @@ class dsa:
                     real_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True)(tf.ones_like(c_private_logits), c_private_logits)
                     fake_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True)(tf.zeros_like(c_public_logits), c_public_logits)
                     c_loss = real_loss + fake_loss
+
+                if self.flatten:
+                    flat_z_pub = z_public.numpy().reshape((batch_size, self.flattened_inter_dim))
+                    x_temp = self.d(flat_z_pub, training=True)
+                else:
+                    x_temp = self.d(z_public, training=True)
+                d_loss = tf.losses.MeanSquaredError()(x_public, x_temp)
             
             # update f and g:
             var = self.f.trainable_variables + self.g.trainable_variables
@@ -84,6 +91,11 @@ class dsa:
             gradients = tape.gradient(c_loss, var)
             self.c_opt.apply_gradients(zip(gradients, var))
 
+            # update decoder d:
+            var = self.d.trainable_variables
+            gradients = tape.gradient(d_loss, var)
+            self.d_opt.apply_gradients(zip(gradients, var))
+
             # Now let's do something with the generative decoder:
             # self.d_opt = tf.keras.optimizers.Adam(learning_rate=lr_d)
             
@@ -92,17 +104,17 @@ class dsa:
 #                 flat_z_pub = self.e(x_public, training=False).numpy().reshape((batch_size, self.flattened_inter_dim))
 #             else:
 #                 z_public = self.e(x_public, training=False)
-            for _ in range(iter_d):
-                with tf.GradientTape() as tape:
-                    if self.flatten:
-                        flat_z_pub = z_public.numpy().reshape((batch_size, self.flattened_inter_dim))
-                        x_temp = self.d(flat_z_pub, training=True)
-                    else:
-                        x_temp = self.d(z_public, training=True)
-                    d_loss = tf.losses.MeanSquaredError()(x_public, x_temp)
-                    var = self.d.trainable_variables
-                gradients = tape.gradient(d_loss, var)
-                self.d_opt.apply_gradients(zip(gradients, var))
+            # for _ in range(iter_d):
+            #     with tf.GradientTape() as tape:
+            #         if self.flatten:
+            #             flat_z_pub = z_public.numpy().reshape((batch_size, self.flattened_inter_dim))
+            #             x_temp = self.d(flat_z_pub, training=True)
+            #         else:
+            #             x_temp = self.d(z_public, training=True)
+            #         d_loss = tf.losses.MeanSquaredError()(x_public, x_temp)
+            #         var = self.d.trainable_variables
+            #     gradients = tape.gradient(d_loss, var)
+            #     self.d_opt.apply_gradients(zip(gradients, var))
     
             # Now we have the generative decoder trained, let's attack original image
             if self.flatten:

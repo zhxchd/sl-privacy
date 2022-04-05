@@ -22,7 +22,7 @@ class mra:
     Note that for an honest-but-curious server-side attacks, the server does not
     tamper with the training process in any way.
     """
-    def train(self, make_f, make_g, loss_fn, batch_size=32, epoch=1, lr=0.001, verbose=True, log_every=10):
+    def train(self, make_f, make_g, loss_fn, batch_size=32, epoch=1, lr=0.001, alpha1=0.0, alpha2=1.0, verbose=True, log_every=10):
         self.batch_size = batch_size
         self.iterations = epoch * self.train_size // batch_size
         train_batches = self.train_ds.batch(batch_size=batch_size, drop_remainder=True).repeat(-1).take(self.iterations)
@@ -46,7 +46,11 @@ class mra:
             with tf.GradientTape(persistent=True) as tape:
                 z = self.f(x_batch, training=True)
                 y_pred = self.g(z, training = True)
-                loss = loss_fn(y_true=y_batch, y_pred=y_pred)
+                loss = loss_fn(y_true=y_batch, y_pred=y_pred)+1e-10
+                if alpha1 != 0.0:
+                    dcor = dist_corr(x_batch, z)
+                    loss = alpha1*dcor + loss*alpha2
+
             var = self.f.trainable_variables + self.g.trainable_variables
             grad = tape.gradient(loss, var)
             opt.apply_gradients(zip(grad, var))
@@ -159,3 +163,29 @@ class mra:
                 print("Iteration %04d: RG-uniform: %0.4f, RG-normal: %0.4f, reconstruction validation: %0.4f" % (iter_count, rg_uniform, rg_normal, attack_mse))
         
         return np.array(log)
+
+def pairwise_dist(A):
+    r = tf.reduce_sum(A*A, 1)
+    r = tf.reshape(r, [-1, 1])
+    D = tf.maximum(r - 2*tf.matmul(A, tf.transpose(A)) + tf.transpose(r), 1e-7)
+    D = tf.sqrt(D+1e-10)
+    return D
+
+def dist_corr(X, Y):
+    X = tf.keras.layers.Flatten()(X)
+    Y = tf.keras.layers.Flatten()(Y)
+    n = tf.cast(tf.shape(X)[0], tf.float32)
+    a = pairwise_dist(X)
+    b = pairwise_dist(Y)
+    A = a - tf.reduce_mean(a, axis=1) -\
+        tf.expand_dims(tf.reduce_mean(a,axis=0),axis=1)+\
+        tf.reduce_mean(a)
+    B = b - tf.reduce_mean(b, axis=1) -\
+        tf.expand_dims(tf.reduce_mean(b,axis=0),axis=1)+\
+        tf.reduce_mean(b)
+    dCovXY = tf.sqrt(1e-10+tf.reduce_sum(A*B) / (n ** 2))
+    dVarXX = tf.sqrt(1e-10+tf.reduce_sum(A*A) / (n ** 2))
+    dVarYY = tf.sqrt(1e-10+tf.reduce_sum(B*B) / (n ** 2))
+
+    dCorXY = dCovXY / tf.sqrt(1e-10 + dVarXX * dVarYY)
+    return dCorXY

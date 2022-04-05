@@ -3,6 +3,7 @@ import numpy as np
 import math
 
 class dsa:
+
     """
     target_ds is the private training examples stored on the clients.
     aux_ds is the public auxiliary dataset stored on the semi-honest server.
@@ -12,7 +13,7 @@ class dsa:
         self.aux_ds = aux_ds
         self.input_shape = target_ds.element_spec[0].shape
     
-    def dsa_attack(self, make_f, make_g, loss_fn, acc_fn, lr, batch_size, iterations, make_e, make_d, make_c, lr_e, lr_d, lr_c, w=None, flatten=False, verbose=True, log_freq=1):
+    def dsa_attack(self, make_f, make_g, loss_fn, acc_fn, lr, batch_size, iterations, make_e, make_d, make_c, lr_e, lr_d, lr_c, w=None, alpha1=0.0, alpha2=1.0, flatten=False, verbose=True, log_freq=1):
         client_dataset = self.target_ds.batch(batch_size, drop_remainder=True).repeat(-1)
         attacker_dataset = self.aux_ds.repeat(-1).batch(batch_size, drop_remainder=True)
         
@@ -50,7 +51,12 @@ class dsa:
                 z_private = self.f(x_private, training=True)
                 y_pred = self.g(z_private, training=True)
                 
-                loss = self.loss_fn(y_true=label_private, y_pred=y_pred)
+                loss = self.loss_fn(y_true=label_private, y_pred=y_pred)+1e-10
+
+                if alpha1 != 0.0:
+                    dcor = dist_corr(x_private, z_private)
+                    loss = alpha1*dcor + loss*alpha2
+
                 acc = self.acc_fn(y_true=label_private, y_pred=y_pred)
 
                 z_public = self.e(x_public, training=True)
@@ -96,26 +102,6 @@ class dsa:
             gradients = tape.gradient(d_loss, var)
             self.d_opt.apply_gradients(zip(gradients, var))
 
-            # Now let's do something with the generative decoder:
-            # self.d_opt = tf.keras.optimizers.Adam(learning_rate=lr_d)
-            
-#             # decoder decode the updated encoder
-#             if self.flatten:
-#                 flat_z_pub = self.e(x_public, training=False).numpy().reshape((batch_size, self.flattened_inter_dim))
-#             else:
-#                 z_public = self.e(x_public, training=False)
-            # for _ in range(iter_d):
-            #     with tf.GradientTape() as tape:
-            #         if self.flatten:
-            #             flat_z_pub = z_public.numpy().reshape((batch_size, self.flattened_inter_dim))
-            #             x_temp = self.d(flat_z_pub, training=True)
-            #         else:
-            #             x_temp = self.d(z_public, training=True)
-            #         d_loss = tf.losses.MeanSquaredError()(x_public, x_temp)
-            #         var = self.d.trainable_variables
-            #     gradients = tape.gradient(d_loss, var)
-            #     self.d_opt.apply_gradients(zip(gradients, var))
-    
             # Now we have the generative decoder trained, let's attack original image
             if self.flatten:
                 flat_z_priv = z_private.numpy().reshape((batch_size, math.prod(self.intermidiate_shape)))
@@ -157,3 +143,29 @@ class dsa:
             rec_res = self.d(self.f(input_examples, training=False), training=False)
         mse = tf.losses.MeanSquaredError()(input_examples, rec_res)
         return mse, rec_res
+
+def pairwise_dist(A):
+    r = tf.reduce_sum(A*A, 1)
+    r = tf.reshape(r, [-1, 1])
+    D = tf.maximum(r - 2*tf.matmul(A, tf.transpose(A)) + tf.transpose(r), 1e-7)
+    D = tf.sqrt(D+1e-10)
+    return D
+
+def dist_corr(X, Y):
+    X = tf.keras.layers.Flatten()(X)
+    Y = tf.keras.layers.Flatten()(Y)
+    n = tf.cast(tf.shape(X)[0], tf.float32)
+    a = pairwise_dist(X)
+    b = pairwise_dist(Y)
+    A = a - tf.reduce_mean(a, axis=1) -\
+        tf.expand_dims(tf.reduce_mean(a,axis=0),axis=1)+\
+        tf.reduce_mean(a)
+    B = b - tf.reduce_mean(b, axis=1) -\
+        tf.expand_dims(tf.reduce_mean(b,axis=0),axis=1)+\
+        tf.reduce_mean(b)
+    dCovXY = tf.sqrt(1e-10+tf.reduce_sum(A*B) / (n ** 2))
+    dVarXX = tf.sqrt(1e-10+tf.reduce_sum(A*A) / (n ** 2))
+    dVarYY = tf.sqrt(1e-10+tf.reduce_sum(B*B) / (n ** 2))
+
+    dCorXY = dCovXY / tf.sqrt(1e-10 + dVarXX * dVarYY)
+    return dCorXY

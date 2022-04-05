@@ -2,10 +2,10 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from functools import partial
 
-def make_mlp(attr_num, class_num, split, units, ed_act="sigmoid"):
+def make_mlp(attr_num, class_num, split, units, ed_act="sigmoid", dropout=0.0):
     assert split >= 1 and split <= 4
     return (
-        partial(make_f, units=units, split=split),
+        partial(make_f, units=units, split=split, dropout=dropout),
         partial(make_g, class_num=class_num, units=units, split=split),
         partial(make_e, units=units, act=ed_act),
         partial(make_d, attr_num=attr_num, act=ed_act),
@@ -22,13 +22,14 @@ def make_mlp_fsha(attr_num, class_num, split, units, ed_act="sigmoid"):
         make_c
     )
 
-def make_f(input_shape, units, split, act="relu"):
+def make_f(input_shape, units, split, act="relu", dropout=0.0):
     xin = layers.Input(input_shape)
     x = xin
     # client side hidden layers
     for _ in range(split):
         x = layers.Dense(units, activation=act)(x)
     
+    x = layers.Dropout(dropout)(x)
     return tf.keras.Model(xin, x)
 
 def make_f_inverse(input_shape, units, split, attr_num, act="relu"):

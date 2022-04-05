@@ -2,10 +2,10 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from functools import partial
 
-def make_mlp(attr_num, class_num, split, fg_units, fg_act, generator_units):
+def make_mlp(attr_num, class_num, split, fg_units, fg_act, generator_units, dropout=0.0):
     assert split >= 1 and split <= 4
     return (
-        partial(make_f, units=fg_units, split=split, act=fg_act),
+        partial(make_f, units=fg_units, split=split, act=fg_act, dropout=0.0),
         partial(make_g, class_num=class_num, units=fg_units, split=split, act=fg_act),
         partial(make_generator, attr_num=attr_num, units=generator_units)
     )
@@ -18,12 +18,14 @@ def make_resnet(attr_num, class_num, split, d_main, d_inter, generator_units):
         partial(make_generator, attr_num=attr_num, units=generator_units)
     )
 
-def make_f(input_shape, units, split, act="relu"):
+def make_f(input_shape, units, split, act="relu", dropout=0.0):
     xin = layers.Input(input_shape)
     x = xin
     # client side hidden layers
     for _ in range(split):
         x = layers.Dense(units, activation=act)(x)
+    
+    x = layers.Dropout(dropout)(x)
     
     return tf.keras.Model(xin, x)
 

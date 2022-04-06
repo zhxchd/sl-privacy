@@ -1,3 +1,4 @@
 # Server-side Feature Inference Attacks in Split Learning
 
-The [report](./docs/paper.pdf) can serve as a white paper.
+- [dsa](./dsa/) directory contains the implementation and experiments regarding *decoding simulator attack* and *feature space hijacking attack*. The implementation of FSHA is based on [Pasquini et al (2021)](https://github.com/pasquini-dario/SplitNN_FSHA).
+- [mra](./mra/) directory contains the implementation and experiments regarding *model recovery attack*.
